@@ -176,3 +176,12 @@ cython_debug/
 
 # custom
 *.csv
+*.json
+*.png
+*.ipynb
+test.py
+[0-9]*/
+main.py
+tmp.py
+
+
