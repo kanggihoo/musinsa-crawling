@@ -5,7 +5,9 @@ from io import BytesIO
 from pathlib import Path
 from typing import List , Dict , Optional , Tuple 
 import pandas as pd
+import shutil
 
+#TODO : 디렉토리 내의 파일 이동코드 작성
 def concat_images_horizontally_centered(images):
     # images: PIL.Image 리스트
 
@@ -97,18 +99,73 @@ def get_pil_image_from_url(url:str)->Image.Image:
         print(f"이미지 다운로드 실패: {url}, 에러: {str(e)}")
         return None
     
-def draw_points(img, points, color=(255, 0, 0)):
-    draw = ImageDraw.Draw(img)
-    for point in points:
-        draw.ellipse((point[0] - 3, point[1] - 3, point[0] + 3, point[1] + 3), fill=color)
-    return img
 
 def make_dir(dir_path:str)->None:
     if not Path(dir_path).exists():
         Path(dir_path).mkdir(parents=True)
 
 
+def move_file(source_path: str, destination_dir: str) -> None:
+    source = Path(source_path)
+    destination = Path(destination_dir)
 
+    if not source.is_file():
+        print(f"오류: 소스 경로가 파일이 아니거나 존재하지 않습니다: {source.absolute()}")
+        return
+
+    if not destination.is_dir():
+        print(f"오류: 대상 경로가 디렉토리가 아니거나 존재하지 않습니다: {destination.absolute()}")
+        # Optionally, create the destination directory if it doesn't exist
+        try:
+            destination.mkdir(parents=True, exist_ok=True)
+            print(f"정보: 대상 디렉토리를 생성합니다: {destination.absolute()}")
+        except Exception as e:
+            print(f"디렉토리 생성 중 오류 발생: {e}")
+            return
+    try:
+        shutil.move(str(source), str(destination))
+        print(f"파일 이동 완료: {source.absolute()} -> {destination.absolute()}")
+    except Exception as e:
+        print(f"파일 이동 중 오류 발생: {e}")
+    
+    return
+
+
+def move_directory(source_dir: str, destination_parent_dir: str) -> None:
+    source = Path(source_dir)
+    # The destination directory should be the parent where the source will be moved *into*
+    destination_parent = Path(destination_parent_dir)
+
+    if not source.is_dir():
+        print(f"오류: 소스 경로가 디렉토리가 아니거나 존재하지 않습니다: {source.absolute()}")
+        return
+
+    if not destination_parent.exists():
+        print(f"정보: 대상 상위 디렉토리가 존재하지 않아 생성합니다: {destination_parent.absolute()}")
+        try:
+            destination_parent.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            print(f"대상 상위 디렉토리 생성 중 오류 발생: {e}")
+            return
+    elif not destination_parent.is_dir():
+        print(f"오류: 대상 경로가 디렉토리가 아닙니다: {destination_parent.absolute()}")
+        return
+
+    # Check if a directory with the same name already exists in the destination
+    destination_path = destination_parent / source.name
+    if destination_path.exists():
+         print(f"오류: 대상 디렉토리에 이미 같은 이름의 파일 또는 디렉토리가 존재합니다: {destination_path.absolute()}")
+         return
+
+    try:
+        shutil.move(str(source), str(destination_parent))
+        print(f"디렉토리 이동 완료: {source.absolute()} -> {destination_parent.absolute()   }")
+    except Exception as e:
+        print(f"디렉토리 이동 중 오류 발생: {e}")
+
+    return
+
+#FIXME : 여기에 들어오는 data가 기존의 df와 동일하다는 보장이 없음
 def add_data_to_dataframe(data:List[Dict], df:pd.DataFrame):
     result_df = pd.concat([df , pd.DataFrame(data)])
     return result_df
@@ -124,4 +181,37 @@ def save_dataframe_to_csv(df:pd.DataFrame , csv_path:str, index_column:Optional[
 def load_dataframe_from_csv(csv_path:str)->pd.DataFrame:
     return pd.read_csv(csv_path,encoding="utf-8")
 
-
+#FIXME : 이미지 저장하는 코드 왜케 지저분 해보이지 
+def save_image_as_jpg(image: Image.Image, save_path: str) -> None:
+    """
+    Safely save a PIL image to JPG format regardless of its original mode
+    
+    Args:
+        image (PIL.Image.Image): PIL Image object to save
+        save_path (str): Path where to save the JPG file
+    """
+    
+    #Convert RGBA images to RGB
+    if image.mode == 'RGBA':
+        # Create white background
+        background = Image.new('RGB', image.size, (255, 255, 255))
+        # Paste using alpha channel as mask
+        background.paste(image, mask=image.split()[3])
+        image = background
+    # Convert P (palette) mode to RGB
+    elif image.mode == 'P':
+        image = image.convert('RGB')
+    # Convert LA (grayscale with alpha) to RGB
+    elif image.mode == 'LA':
+        background = Image.new('RGB', image.size, (255, 255, 255))
+        background.paste(image, mask=image.split()[1])
+        image = background
+    # Convert L (grayscale) to RGB
+    elif image.mode == 'L':
+        image = image.convert('RGB')
+    
+    # Save the image
+    try:
+        image.save(save_path, 'JPEG', quality=95)   
+    except Exception as e:
+        image.save(save_path)

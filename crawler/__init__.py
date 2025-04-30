@@ -1,5 +1,5 @@
 from .crawler import *
-from .preprocess import image_preprocess
+from .preprocess import *
 from .utils import *
 
 __all__ = ["Crawler" , "get_product_detail_info" , "crawl_product_list" , "get_one_product_info" , "get_row_product_info" , 

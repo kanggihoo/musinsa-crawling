@@ -3,15 +3,29 @@ import glob
 import natsort 
 import shutil
 from natsort import natsorted
-from typing import List , Union
+from typing import List , Union, Optional
 from pathlib import Path
 from io import BytesIO
 import requests
 import numpy as np
 from urllib.parse import quote , urlparse
-from .utils import make_dir
+from .utils import make_dir , save_image_as_jpg
+from typing import Tuple
+
+# Define a class to hold processed image segment information
+class ProcessedImageSegment:
+    def __init__(self, pil_image: Image.Image, original_url: str, segment_index: int, is_text_segment: bool , segment_id: int):
+        self.pil_image: Image.Image = pil_image
+        self.original_url: str = original_url
+        self.segment_index: int = segment_index # Index within the original image
+        self.is_text_segment: bool = is_text_segment # True if classified as text (wide)
+        self.segment_id: int = segment_id
+    def __repr__(self):
+        type_str = "Text" if self.is_text_segment else "Image"
+        return f"<ProcessedImageSegment original_url='{self.original_url}' index={self.segment_index} type={type_str} size={self.pil_image.size}>"
 
 
+#TODO : text 이미지로 분류한 분활된 이미지를 가로 세로 비율이 맞을 때 까지 수직으로 이어 붙히는 코드 작성
 
 def is_wide_image(image:Image.Image , threshold_ratio: float = 3.0) -> bool:
     return (image.width / image.height) > threshold_ratio 
@@ -29,7 +43,7 @@ def move_files(image_paths: Union[List[str], str], output_dirs:str) -> None:
         # print(f"Moved {filename} to {category} images directory")
 
 
-def get_pil_image_from_url(url:str)->np.ndarray:
+def get_pil_image_from_url(url:str)-> Optional[Image.Image]:
     # url 문자열 전처리 
     if url.startswith("//"):
         url = "https:" + url
@@ -43,76 +57,20 @@ def get_pil_image_from_url(url:str)->np.ndarray:
         if response.status_code != 200:
             raise requests.exceptions.HTTPError(f"HTTP {response.status_code}: {response.reason}")
         image_stream = BytesIO(response.content)
-        image_array = np.frombuffer(image_stream.read(), np.uint8)
-        img = Image.open(image_stream).convert("RGB")
-        return img
-    except requests.exceptions.RequestException as e:
-        print(f"이미지 다운로드 실패: {url}, 에러: {str(e)}")
-        return None
-
-def save_image_as_jpg(image: Image.Image, save_path: str) -> None:
-    """
-    Safely save a PIL image to JPG format regardless of its original mode
-    
-    Args:
-        image (PIL.Image.Image): PIL Image object to save
-        save_path (str): Path where to save the JPG file
-    """
-    # Create a copy to avoid modifying the original image
-    img_to_save = image.copy()
-    
-    # Convert RGBA images to RGB
-    if img_to_save.mode == 'RGBA':
-        # Create white background
-        background = Image.new('RGB', img_to_save.size, (255, 255, 255))
-        # Paste using alpha channel as mask
-        background.paste(img_to_save, mask=img_to_save.split()[3])
-        img_to_save = background
-    # Convert P (palette) mode to RGB
-    elif img_to_save.mode == 'P':
-        img_to_save = img_to_save.convert('RGB')
-    # Convert LA (grayscale with alpha) to RGB
-    elif img_to_save.mode == 'LA':
-        background = Image.new('RGB', img_to_save.size, (255, 255, 255))
-        background.paste(img_to_save, mask=img_to_save.split()[1])
-        img_to_save = background
-    # Convert L (grayscale) to RGB
-    elif img_to_save.mode == 'L':
-        img_to_save = img_to_save.convert('RGB')
-    
-    # Save the image
-    img_to_save.save(save_path, 'JPEG', quality=95)
-
-
-
-def get_pil_image_from_url(url:str)->Image.Image:
-    # url 문자열 전처리 
-    if url.startswith("//"):
-        url = "https:" + url
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36"
-    }
-    
-    try:
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()  # HTTP 에러 발생시 예외 발생
-        if response.status_code != 200:
-            raise requests.exceptions.HTTPError(f"HTTP {response.status_code}: {response.reason}")
-        image_stream = BytesIO(response.content)
+        # image_array = np.frombuffer(image_stream.read(), np.uint8)
         pil_image = Image.open(image_stream).convert("RGB")
         return pil_image
     except requests.exceptions.RequestException as e:
         print(f"이미지 다운로드 실패: {url}, 에러: {str(e)}")
         return None
+
+
     
 def pil_image_show(img:Image.Image , title:str = "image" ):
     if img is not None:
-        img.show()
+        img.show(title=title) # Add title to show window
     else:
         print("이미지가 없습니다." , type(img))
-
-
-
 
 def is_image_height_enough(image:Image.Image , threshold_height:int = 30)->bool:
     _, height = image.size
@@ -172,24 +130,29 @@ def adjust_split_points(split_points: List[tuple], image_height: int, offset: in
         return [(split_points[i-1][1]-offset, split_points[i][0]+offset) 
                 for i in range(1, len(split_points))]
 
-def save_segments(segments: List[Image.Image], save_dir:str ,suffix:str="jpg", **kwargs):
-    file_num = kwargs.get("file_num", 1)
-    for i, seg in enumerate(segments):  
-        image_name = f"split_segment_{file_num}_{i+1}.{suffix}"
-        if is_wide_image(seg):
-            save_image_as_jpg(seg, f"{save_dir}/texts/{image_name}")
+def save_segments(segments: List[ProcessedImageSegment], save_dir:str ,suffix:str="jpg"):
+    # Ensure the base directories exist before looping
+    make_dir(f"{save_dir}/texts")
+    make_dir(f"{save_dir}/images")
+
+    for idx, seg in enumerate(segments):
+        image_name = f"segment_{seg.segment_id}_{idx}.{suffix}" 
+        if seg.is_text_segment:
+            save_path = f"{save_dir}/texts/{image_name}"
         else:
-            save_image_as_jpg(seg, f"{save_dir}/images/{image_name}")
+            save_path = f"{save_dir}/images/{image_name}"
+        
+        save_image_as_jpg(seg.pil_image, save_path) 
 
  
-        
-    
+
+
 def split_image_by_white_rows(
     img: Image.Image,
     white_rows: np.ndarray,
     min_white_band: int = 10,
     offset: int = 10 , # 기본 offset 5 픽셀d
-    min_image_height:int = 15
+    min_image_height:int = 10
 ) -> List[Image.Image]:
     """
     긴 이미지를 white_rows 기반으로 여러 이미지로 분할 (offset 추가)
@@ -252,63 +215,127 @@ def split_image_by_white_rows(
 
     return cropped_images
 
-def image_preprocess(images_url: List[str], 
-                     is_crop:bool = True ,
-                     is_save:bool = True ,
-                     save_dir:str = "./data" ,
-                     save_single_dir:bool = False,
-                     suffix:str = "jpg"
-                     ):
-    if is_save and not is_crop:
-        make_dir(f"{save_dir}/images")
-    if is_save and is_crop:
-        make_dir(f"{save_dir}/images")
-        make_dir(f"{save_dir}/texts")
-        
+def get_white_rows_by_meancount(image:Image.Image ,  mean_threshold, dark_threshold ,dark_threshold_count )->np.ndarray:
+    """
+    이미지에서 흰색 행을 찾는 함수
+    """
+    if isinstance(image, str):
+        image = Image.open(image)
+    image_np = np.asarray(image.copy())
+    mean_pixels = image_np[:, :, :3].mean(axis=(1, 2)) > mean_threshold
+    dark_pixels = [np.sum(row < dark_threshold) > dark_threshold_count for row in np.mean(image_np, axis=2)]
+    final = ~np.array(dark_pixels) & mean_pixels   # Changed from 'not dark_pixels' to '~np.array(dark_pixels)'
+    return final
 
-    file_num = 1
-    for idx in range(len(images_url)):
-        image = get_pil_image_from_url(images_url[idx])
-       
+def get_white_rows_by_diff(image_path:Union[str,Image.Image] , log_threshold:float = 1.2)->Tuple[np.ndarray,np.ndarray]:
+    """
+    각 열의 차이를 계산(절대값 적용)하고 정렬하여 전체 열의 0.05 크기만큼 샘플링하여 최소값과 최대값의 평균을 계산
+    log_transform = True일 경우 로그 변환 적용하여 앞에 구한 각 열의 최대 평균의 로그 값과, 최대 최소의 차이의 로그 값을 반환
+    """
+    if isinstance(image_path, str):
+    # 이미지 로드
+        img = Image.open(image_path)
+    elif isinstance(image_path, np.ndarray):
+        img = Image.fromarray(image_path)
+    else:
+        img = image_path
+    gray = img.convert("L")
+    gray_np = np.array(gray)
+    # 각 행 간의 차이 계산
+    col_diff = abs(np.diff(gray_np.astype(np.int16), axis=1))
+    col_diff_sort = np.sort(col_diff, axis=1)
+    # sample_interval = int(img.width*0.025)
+    # print(sample_interval)
+    col_diff_min_mean , col_diff_max_mean = col_diff_sort[:,:10].mean(axis=1) , col_diff_sort[:,-4:].mean(axis=1)
+    
+
+    log_max_mean = np.log1p(col_diff_max_mean)
+    # col_diff_range = col_diff_max_mean - col_diff_min_mean
+    # log_range = np.log1p(col_diff_range)
+    
+    return np.array(log_max_mean < log_threshold) 
+
+def get_white_rows(image:Image.Image , mean_threshold = 230, dark_threshold = 200 ,dark_threshold_count = 5 )->np.ndarray:
+    """
+    이미지에서 흰색 행을 찾는 함수
+    """
+    cond1 = get_white_rows_by_meancount(image , mean_threshold , dark_threshold , dark_threshold_count)
+    cond2 = get_white_rows_by_diff(image)
+    return cond1 & cond2
+    
+
+
+def image_preprocess(images_url: Union[List[str], str], 
+                     is_crop:bool = True,
+                     min_white_band: int = 40,
+                     crop_offset: int = 10,
+                     min_segment_height: int = 10
+                     ) -> List[ProcessedImageSegment]:
+    """
+    Downloads images from URLs, optionally splits them into segments based on white rows,
+    and returns a list of ProcessedImageSegment objects containing the PIL images and metadata.
+
+    Args:
+        images_url (List[str]): List of image URLs to process.
+        is_crop (bool): Whether to crop images into segments. Defaults to True.
+        min_white_band (int): Minimum height of a white band to consider for splitting.
+        crop_offset (int): Offset pixels to add/subtract when cropping segments.
+        min_segment_height (int): Minimum height for a cropped segment to be kept.
+
+    Returns:
+        List[ProcessedImageSegment]: A list containing ProcessedImageSegment objects
+                                      for each resulting image or segment.
+    """
+    processed_segments: List[ProcessedImageSegment] = []
+    if isinstance(images_url, str):
+        images_url = [images_url]
+    for idx , url in enumerate(images_url):
+        image = get_pil_image_from_url(url)
+        if image is None:
+            continue
+
         if is_crop:
+            # Detect white rows for potential splitting
+            white_rows = get_white_rows(image)
+            # Split the image based on detected white rows
+            segments = split_image_by_white_rows(
+                image, 
+                white_rows, 
+                min_white_band=min_white_band, 
+                offset=crop_offset,
+                min_image_height=min_segment_height
+            )
             
-            image_np = np.asarray(image.copy())
-
-            # 흰색 밴드 감지 (최적화된 버전)
-            mean_threshold = 220
-            dark_threshold = 200
-            dark_threshold_count = 5
-            
-            # 방법 1: 흰색이 아닌 픽셀 수 계산
-            # RGB 채널별로 한 번에 처리
-            # 행별로 모든 픽셀이 흰색인지 확인 (axis 1은 너비, axis 2는 채널)
-            white = image_np[:, :, :3].mean(axis=(1, 2)) > mean_threshold
-            dark_pixels = [np.sum(row < dark_threshold) > dark_threshold_count for row in np.mean(image_np, axis=2)]
-            final = ~np.array(dark_pixels) & white  # Changed from 'not dark_pixels' to '~np.array(dark_pixels)'
-            
-            
-            segments = split_image_by_white_rows(image , final, min_white_band=40)
-            # # 세그먼트 저장
-            if is_save:
-                save_segments(segments, save_dir = save_dir, file_num=file_num ,save_single_dir=save_single_dir)
-                file_num += 1
+            # Create ProcessedImageSegment objects for each segment
+            for i, seg in enumerate(segments):
+                is_text = is_wide_image(seg)
+                segment_obj = ProcessedImageSegment(
+                    pil_image=seg,
+                    original_url=url,
+                    segment_index=i,
+                    is_text_segment=is_text,
+                    segment_id=idx
+                )
+                processed_segments.append(segment_obj)
         else:
-            if is_save:
-                save_path = f"{save_dir}/images/summary_{idx}.{suffix}"
-                save_image_as_jpg(image, save_path)
-                 
+            # If not cropping, treat the whole image as a single segment
+            is_text = is_wide_image(image)
+            segment_obj = ProcessedImageSegment(
+                pil_image=image,
+                original_url=url,
+                segment_index=0, # Index 0 for the whole image
+                is_text_segment=is_text,
+                segment_id=idx
+            )
+            processed_segments.append(segment_obj)
+            
+    return processed_segments
             
 def is_image_height_enough(image:Image.Image , threshold_height:int = 30)->bool:
     _, height = image.size
     if height < threshold_height:
         return False
     return True
-
-
-# move_files(text_images, "text")
-# move_files(cloth_images, "cloth")
-
-
 
 
 

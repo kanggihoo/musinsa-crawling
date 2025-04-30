@@ -9,9 +9,9 @@ from bs4 import BeautifulSoup
 import time
 from selenium.webdriver.remote.webelement import WebElement
 
-columns = ["category_main" , "category_sub" , "gender" , "product_id" ,"product_name", "product_href" ,"product_price" , "product_original_price" , "product_discount_price" , "product_discount_rate", "product_brand_name" , "num_likes" , "avg_rating" , "review_count"]
+COLUMNS = ["category_main" , "category_sub" , "gender" , "product_id" ,"product_name", "product_href" ,"product_price" , "product_original_price" , "product_discount_price" , "product_discount_rate", "product_brand_name" , "num_likes" , "avg_rating" , "review_count"]
 class Crawler:
-    def __init__(self, headless=False , base_url:Optional[str]=None , error_message:str = None):
+    def __init__(self, headless=False , base_url:Optional[str]=None , error_message:str = "failed"):
         self.base_url = base_url
         self.driver = None
         self.headless = headless
@@ -129,59 +129,124 @@ class Crawler:
             print(f"클릭 및 입력 중 오류 발생: {e}")
             return self.error_message
 
+    def close(self):
+        """웹드라이버를 안전하게 종료합니다."""
+        try:
+            if self.driver:
+                self.driver.quit()
+                print("웹드라이버가 안전하게 종료되었습니다.")
+        except Exception as e:
+            print(f"웹드라이버 종료 중 오류 발생: {e}")
 
+def fill_default_value(product_data:Dict , columns:List[str] , crawling_status:str)->Dict:
+    for column in columns:
+        product_data[column] = crawling_status
 
-def get_one_product_info(item :BeautifulSoup , columns:List[str], **params)->Dict :
-    image_section = item.select_one(".sc-fsjlER.jYcDQz a")
-    product_id = image_section.get("data-item-id")
-    product_href = image_section.get("href")
-    product_price = image_section.get("data-price")
-    product_original_price = image_section.get("data-original-price")
-    product_discount_price = image_section.get("data-discount")
-    product_discount_rate = image_section.get("data-discount-rate")
-    product_brand_name = image_section.get("data-brand-id")
+def fill_value(product_data:Dict , **kwargs)->Dict:
+    for key , value in kwargs.items():
+        product_data[key] = value
+
+def get_one_product_info(item :BeautifulSoup ,  **params)->Dict :
+    product_data = {}
+    product_data["crawling_status"] = {"image_section":"success" , "detail_section":"success"}
+    try:
+        # image section 추출 
+        image_section = item.select_one(".sc-jPkiSJ a")   
+         
+        product_id = image_section.get("data-item-id")
+        product_href = image_section.get("href")
+        product_price = image_section.get("data-price")
+        product_original_price = image_section.get("data-original-price")
+        product_discount_price = image_section.get("data-discount")
+        product_discount_rate = image_section.get("data-discount-rate")
+        product_brand_name = image_section.get("data-brand-id")
+        fill_value(product_data , product_id = product_id , product_href = product_href , product_price = product_price , product_original_price = product_original_price , product_discount_price = product_discount_price , product_discount_rate = product_discount_rate , product_brand_name = product_brand_name)
+    except Exception as e:
+        print(f"상품 정보 image section 추출 중 오류 발생: {e}")
+        fill_default_value(product_data , ["product_id" , "product_href" , "product_price" , "product_original_price" , "product_discount_price" , "product_discount_rate" , "product_brand_name"] , "failed")
+        product_data["crawling_status"]["image_section"] = "failed"
+        
+    try:
+    # detail section 추출 
+        detail_section = item.select_one(".sc-dZEakj.iDBPjO")
+        product_name_element = detail_section.select_one(".sc-cNFqVt.dhrvja a:nth-child(2)")
+        product_name = product_name_element.text if product_name_element else None
     
-    detail_section = item.select_one(".sc-dZEakj.iDBPjO")
-    product_name = detail_section.select_one(".sc-cNFqVt.dhrvja a:nth-child(2)").text
-    
-    # 요소가 없을 경우 None을 반환하는 함수 
-    def get_text_or_default(selector, default=None):
-        element = detail_section.select_one(selector)
-        return element.text if element else default
-    
-    # 각 요소 안전하게 가져오기
-    num_likes = get_text_or_default(".sc-fpEFIB.fHfJGx div:nth-child(1) span", None)
-    avg_rating = get_text_or_default(".sc-fpEFIB.fHfJGx div:nth-child(2) span:nth-child(1)", None)
-    review_count = get_text_or_default(".sc-fpEFIB.fHfJGx div:nth-child(2) span:nth-child(2)", None)
+        # 요소가 없을 경우 None을 반환하는 함수 
+        def get_text_or_default(selector, default=None):
+            element = detail_section.select_one(selector)
+            return element.text if element else default
+        
+        #REVIEW 추출을 하는데 None을 집어넣으면 진짜 없는건지 , 크롤링 실패한건지 구분이 안될거 같은데 
+        # 각 요소 안전하게 가져오기
+        num_likes = get_text_or_default(".sc-fpEFIB.fHfJGx div:nth-child(1) span", None)
+        avg_rating = get_text_or_default(".sc-fpEFIB.fHfJGx div:nth-child(2) span:nth-child(1)", None)
+        review_count = get_text_or_default(".sc-fpEFIB.fHfJGx div:nth-child(2) span:nth-child(2)", None)
     
     # 데이터 반환
-    # columns = ["category_main" , "category_sub" , "gender" , "product_id" ,"product_name", "product_href" , "product_original_price" , "product_discount_price" , "product_discount_rate", "product_brand_name" , "num_likes" , "avg_rating" , "review_count"]
-    
-    return {column:value for column , value in zip(columns , [*params.values() , product_id , product_name , product_href , product_price , product_original_price , product_discount_price , product_discount_rate , product_brand_name , num_likes , avg_rating , review_count])}
+        fill_value(product_data , product_name = product_name , num_likes = num_likes , avg_rating = avg_rating , review_count = review_count)
+        fill_value(product_data , **params)
+        product_data["crawling_status"]["detail_section"] = "success"
+        if all([True if i == "success" else False for i in product_data["crawling_status"].values()]):
+            product_data["success_status"] = "success"
+        else:
+            product_data["success_status"] = "failed"
+            
+    except Exception as e:
+        print(f"상품 정보 detail section 추출 중 오류 발생: {e}")
+        fill_default_value(product_data , ["product_name" , "num_likes" , "avg_rating" , "review_count"] , "failed")
+        product_data["crawling_status"]["detail_section"] = "failed"
+        product_data["success_status"] = "failed"
 
-def get_row_product_info(page_index:int , soup:BeautifulSoup , columns:List[str] , **params) -> List[Dict]:
+    return product_data
+
+def get_row_product_info(soup:BeautifulSoup  , **params) -> List[Dict]:
         # target_element = soup.select_one(f'div[data-index="{page_index}"]')
         # assert target_element is not None , f"{page_index} 페이지 로드 실패"
         product_list = []
-        for item in soup.select("div.sc-dNpohg.jKFuqW"):
-            product_data = get_one_product_info(item , columns , **params)
+        for item in soup.select(".sc-jnflPq.kUzqzX"):
+            product_data = get_one_product_info(item , **params)
             product_list.append(product_data)
-            
+        
         return product_list
     
-def crawl_product_list(crawler:Crawler , num_scrolls:int , dy:int=470,**params)->List[Dict]:
+def crawl_product_list(crawler:Crawler , num_scrolls:int=None , dy:int=470, infinite_scroll:bool=False, **params)->List[Dict]:
     start , end = 0 , dy
-    page_index = 0
+    scroll_count = 0
     crawled_data = []
-    for _ in range(num_scrolls):
-        time.sleep(0.2)
-        target_element = crawler.wait_for_element_by_css_selector(f".sc-k7xv49-0.hRlVQI div[data-index='{page_index}']")
+    last_height = crawler.driver.execute_script("return document.body.scrollHeight")
+    
+    while True:
+        try:
+            target_element = crawler.wait_for_element_by_css_selector(f".sc-k7xv49-0.hRlVQI div[data-index='{scroll_count}']")
+        except:
+            print(f"더 이상 크롤링할 상품이 없습니다. 총 {scroll_count}번의 스크롤 진행.")
+            break
+            
         soup = BeautifulSoup(target_element.get_attribute("innerHTML"), "html.parser")
-        product_list = get_row_product_info(page_index , soup, columns , **params)
+        product_list = get_row_product_info(soup, **params)
         crawled_data.extend(product_list)
+        
         crawler.scroll_from_start_to_end(start , end)
+        time.sleep(0.2)
+        # 스크롤 후 새로운 컨텐츠가 로드될 때까지 대기
+        new_height = crawler.driver.execute_script("return document.body.scrollHeight") 
+        try:
+            # 다음 인덱스의 요소가 나타날 때까지 대기
+            next_element = crawler.wait_for_element_by_css_selector(f".sc-k7xv49-0.hRlVQI div[data-index='{scroll_count + 1}']")
+        except:
+            if new_height == last_height:
+                print(f"페이지 끝에 도달했습니다. 총 {scroll_count + 1}번의 스크롤 진행.")
+                break
+        
+        time.sleep(0.1)
         start , end = end , end + dy
-        page_index += 1
+        scroll_count += 1
+        last_height = new_height
+        
+        # 무한 스크롤이 아니고 지정된 스크롤 수에 도달한 경우
+        if not infinite_scroll and num_scrolls is not None and scroll_count >= num_scrolls:
+            break
         
     return crawled_data
 
@@ -337,7 +402,6 @@ def get_product_detail_info(crawler:Crawler , product_id:str, is_process:bool = 
                 if colors_element != crawler.error_message:
                     color_soup = BeautifulSoup(colors_element.get_attribute("innerHTML") , "html.parser")
                     color_names = []
-                    color_elements = colors_element.find_elements(By.CSS_SELECTOR, ".sc-102tdfw-1") # Find elements to click later
 
                     for color in color_soup.select(".sc-102tdfw-1"):
                         color_name_span = color.select_one("span")
@@ -413,7 +477,6 @@ def get_product_detail_info(crawler:Crawler , product_id:str, is_process:bool = 
         print(f"크롤링 실패 [Section 5]: 제품 색상/사이즈 정보 추출 중 오류 발생 - {e}")
         color_size_info = crawler.error_message
 
-    #FIXME : processor 에서 처리한거 반환하고, 따로 저장하는 방식으로 변경
     # Process images only if crawling was successful
     # if is_process:
     #     if crawling_status["summary_images"] == "success" and isinstance(product_summary_images, list):
