@@ -9,7 +9,7 @@ from pathlib import Path
 if __name__ == "__main__":
     
     # image_path = "./test/test_orgin_image_8_4385261_0.jpg"
-    image_path = "./t5.jpg"
+    image_path = r"C:\Users\11kkh\Desktop\crawling\4979827\images\segment_2_39.jpg"
     image = Image.open(image_path)
     # results = find_split_points_by_diff(image_path)
     # width , height = image.size

@@ -7,7 +7,6 @@ from typing import List , Dict , Optional , Tuple
 import pandas as pd
 import shutil
 
-#TODO : 디렉토리 내의 파일 이동코드 작성
 def concat_images_horizontally_centered(images):
     # images: PIL.Image 리스트
 
@@ -105,65 +104,7 @@ def make_dir(dir_path:str)->None:
         Path(dir_path).mkdir(parents=True)
 
 
-def move_file(source_path: str, destination_dir: str) -> None:
-    source = Path(source_path)
-    destination = Path(destination_dir)
 
-    if not source.is_file():
-        print(f"오류: 소스 경로가 파일이 아니거나 존재하지 않습니다: {source.absolute()}")
-        return
-
-    if not destination.is_dir():
-        print(f"오류: 대상 경로가 디렉토리가 아니거나 존재하지 않습니다: {destination.absolute()}")
-        # Optionally, create the destination directory if it doesn't exist
-        try:
-            destination.mkdir(parents=True, exist_ok=True)
-            print(f"정보: 대상 디렉토리를 생성합니다: {destination.absolute()}")
-        except Exception as e:
-            print(f"디렉토리 생성 중 오류 발생: {e}")
-            return
-    try:
-        shutil.move(str(source), str(destination))
-        print(f"파일 이동 완료: {source.absolute()} -> {destination.absolute()}")
-    except Exception as e:
-        print(f"파일 이동 중 오류 발생: {e}")
-    
-    return
-
-
-def move_directory(source_dir: str, destination_parent_dir: str) -> None:
-    source = Path(source_dir)
-    # The destination directory should be the parent where the source will be moved *into*
-    destination_parent = Path(destination_parent_dir)
-
-    if not source.is_dir():
-        print(f"오류: 소스 경로가 디렉토리가 아니거나 존재하지 않습니다: {source.absolute()}")
-        return
-
-    if not destination_parent.exists():
-        print(f"정보: 대상 상위 디렉토리가 존재하지 않아 생성합니다: {destination_parent.absolute()}")
-        try:
-            destination_parent.mkdir(parents=True, exist_ok=True)
-        except Exception as e:
-            print(f"대상 상위 디렉토리 생성 중 오류 발생: {e}")
-            return
-    elif not destination_parent.is_dir():
-        print(f"오류: 대상 경로가 디렉토리가 아닙니다: {destination_parent.absolute()}")
-        return
-
-    # Check if a directory with the same name already exists in the destination
-    destination_path = destination_parent / source.name
-    if destination_path.exists():
-         print(f"오류: 대상 디렉토리에 이미 같은 이름의 파일 또는 디렉토리가 존재합니다: {destination_path.absolute()}")
-         return
-
-    try:
-        shutil.move(str(source), str(destination_parent))
-        print(f"디렉토리 이동 완료: {source.absolute()} -> {destination_parent.absolute()   }")
-    except Exception as e:
-        print(f"디렉토리 이동 중 오류 발생: {e}")
-
-    return
 
 #FIXME : 여기에 들어오는 data가 기존의 df와 동일하다는 보장이 없음
 def add_data_to_dataframe(data:List[Dict], df:pd.DataFrame):
@@ -171,6 +112,8 @@ def add_data_to_dataframe(data:List[Dict], df:pd.DataFrame):
     return result_df
 
 def save_dataframe_to_csv(df:pd.DataFrame , csv_path:str, index_column:Optional[str]=None):
+    if isinstance(csv_path, Path):
+        csv_path = str(csv_path)
     if index_column is not None:
         if index_column not in df.columns:
             raise ValueError(f"dataframe 내에 {index_column} 열이 존재하지 않음")

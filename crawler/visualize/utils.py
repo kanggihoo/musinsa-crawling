@@ -10,7 +10,7 @@ def draw_points(img, points, color=(255, 0, 0)):
         draw.ellipse((point[0] - 3, point[1] - 3, point[0] + 3, point[1] + 3), fill=color)
     return img
 
-def get_white_rows_by_diff(image_path:Union[str,Image.Image],log_transform:bool=True)->Tuple[np.ndarray,np.ndarray]:
+def get_rows_diff(image_path:Union[str,Image.Image],log_transform:bool=True)->Tuple[np.ndarray,np.ndarray]:
     """
     각 열의 차이를 계산(절대값 적용)하고 정렬하여 전체 열의 0.05 크기만큼 샘플링하여 최소값과 최대값의 평균을 계산
     log_transform = True일 경우 로그 변환 적용하여 앞에 구한 각 열의 최대 평균의 로그 값과, 최대 최소의 차이의 로그 값을 반환

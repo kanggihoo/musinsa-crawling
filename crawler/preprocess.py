@@ -1,16 +1,21 @@
-from PIL import Image
-import glob 
-import natsort 
-import shutil
-from natsort import natsorted
-from typing import List , Union, Optional
+import os
 from pathlib import Path
+import shutil
+from PIL import Image
+import numpy as np
+from natsort import natsorted
+from typing import List , Union, Optional , Tuple
+from collections import defaultdict
 from io import BytesIO
 import requests
-import numpy as np
+
 from urllib.parse import quote , urlparse
+
+
+
+
+
 from .utils import make_dir , save_image_as_jpg
-from typing import Tuple
 
 # Define a class to hold processed image segment information
 class ProcessedImageSegment:
@@ -25,9 +30,7 @@ class ProcessedImageSegment:
         return f"<ProcessedImageSegment original_url='{self.original_url}' index={self.segment_index} type={type_str} size={self.pil_image.size}>"
 
 
-#TODO : text 이미지로 분류한 분활된 이미지를 가로 세로 비율이 맞을 때 까지 수직으로 이어 붙히는 코드 작성
-
-def is_wide_image(image:Image.Image , threshold_ratio: float = 3.0) -> bool:
+def is_wide_image(image:Image.Image , threshold_ratio: float = 8.0) -> bool:
     return (image.width / image.height) > threshold_ratio 
 
 # 파일 이동
@@ -42,7 +45,7 @@ def move_files(image_paths: Union[List[str], str], output_dirs:str) -> None:
         shutil.move(image_path, str(output_dir / file_name))
         # print(f"Moved {filename} to {category} images directory")
 
-
+# FIXME : 여기 부분 비동기 처리로??
 def get_pil_image_from_url(url:str)-> Optional[Image.Image]:
     # url 문자열 전처리 
     if url.startswith("//"):
@@ -144,7 +147,87 @@ def save_segments(segments: List[ProcessedImageSegment], save_dir:str ,suffix:st
         
         save_image_as_jpg(seg.pil_image, save_path) 
 
- 
+def find_content_regions(white_rows):
+    """컨텐츠(비흰색) 영역의 시작점과 끝점을 찾는 함수"""
+    height = len(white_rows)
+    content_regions = []
+    
+    i = 0
+    while i < height:
+        # 컨텐츠 영역 시작점 찾기
+        if not white_rows[i]:
+            start = i
+            # 컨텐츠 영역 끝점 찾기
+            while i < height and not white_rows[i]:
+                i += 1
+            end = i - 1
+            content_regions.append((start, end))
+        else:
+            i += 1
+    
+    return content_regions
+
+def process_content_regions(content_regions, image_height, min_content_height, min_white_gap, padding=10):
+    """
+    컨텐츠 영역을 처리하는 함수
+    - 너무 작은 컨텐츠 영역은 노이즈로 제거
+    - 너무 가까운 컨텐츠 영역은 병합
+    - 적절한 여백 추가
+    
+    Parameters:
+    - content_regions: 원본 컨텐츠 영역 리스트 [(시작행, 끝행), ...]
+    - image_height: 전체 이미지 높이
+    - min_content_height: 유효한 컨텐츠로 간주할 최소 높이
+    - min_white_gap: 컨텐츠 영역을 분리하기 위한 최소 흰색 영역 높이
+    - padding: 각 분할 영역에 추가할 상하 여백
+    
+    Returns:
+    - 최종 분할 영역 리스트 [(시작행, 끝행), ...]
+    """
+    if not content_regions:
+        return [(0, image_height-1)]
+    
+    # 1. 너무 작은 컨텐츠 영역 제거 (노이즈 제거)
+    valid_regions = []
+    for start, end in content_regions:
+        if end - start + 1 >= min_content_height:
+            valid_regions.append((start, end))
+    
+    if not valid_regions:
+        return [(0, image_height-1)]
+    
+    # 2. 가까운 컨텐츠 영역 병합
+    merged_regions = []
+    current_start, current_end = valid_regions[0]
+    
+    for i in range(1, len(valid_regions)):
+        next_start, next_end = valid_regions[i]
+        
+        # 두 컨텐츠 영역 사이의 흰색 영역 길이 계산
+        white_gap = next_start - current_end - 1
+        
+        # 흰색 간격이 충분히 크지 않으면 병합
+        if white_gap < min_white_gap:
+            current_end = next_end  # 현재 영역 확장
+        else:
+            # 충분한 간격이 있으면 현재 영역 저장하고 다음 영역으로 이동
+            merged_regions.append((current_start, current_end))
+            current_start, current_end = next_start, next_end
+    
+    # 마지막 영역 추가
+    merged_regions.append((current_start, current_end))
+    
+    # 3. 분할 영역 계산 (여백 포함) - 직접 패딩 적용
+    split_regions = []
+    for i, (start, end) in enumerate(merged_regions):
+        # 패딩 적용한 시작점과 끝점 계산
+        padded_start = max(0, start - padding)
+        padded_end = min(image_height - 1, end + padding)
+        split_regions.append((padded_start, padded_end))
+    
+    
+    return split_regions
+
 
 
 def split_image_by_white_rows(
@@ -217,13 +300,13 @@ def split_image_by_white_rows(
 
 def get_white_rows_by_meancount(image:Image.Image ,  mean_threshold, dark_threshold ,dark_threshold_count )->np.ndarray:
     """
-    이미지에서 흰색 행을 찾는 함수
+    이미지에서 흰색 행을 찾는 함수 ()
     """
     if isinstance(image, str):
         image = Image.open(image)
     image_np = np.asarray(image.copy())
     mean_pixels = image_np[:, :, :3].mean(axis=(1, 2)) > mean_threshold
-    dark_pixels = [np.sum(row < dark_threshold) > dark_threshold_count for row in np.mean(image_np, axis=2)]
+    dark_pixels = [np.sum(row < dark_threshold) > dark_threshold_count for row in np.mean(image_np[:,:,:3], axis=2)]
     final = ~np.array(dark_pixels) & mean_pixels   # Changed from 'not dark_pixels' to '~np.array(dark_pixels)'
     return final
 
@@ -330,13 +413,150 @@ def image_preprocess(images_url: Union[List[str], str],
             processed_segments.append(segment_obj)
             
     return processed_segments
-            
+
+def image_preprocess_new(images_url: Union[List[str], str], 
+                     is_crop:bool = True,
+                     min_content_height: int = 20,
+                     min_white_gap: int = 3,
+                     padding: int = 5
+                     ) -> List[ProcessedImageSegment]:
+    processed_segments: List[ProcessedImageSegment] = []
+    if isinstance(images_url, str):
+        images_url = [images_url]
+    for idx , url in enumerate(images_url):
+        image = get_pil_image_from_url(url)
+        if image is None:
+            continue
+        if is_crop:
+            # Detect white rows for potential splitting
+            white_rows = get_white_rows(image)
+            # 컨텐츠 영역 찾기
+            content_regions = find_content_regions(white_rows)
+            # 이미지 분할 영역 계산
+            split_regions = process_content_regions(
+                content_regions, 
+                image.height, 
+                min_content_height, 
+                min_white_gap, 
+                padding
+            )
+            segments = []
+            for i, (start , end) in enumerate(split_regions):
+                segments.append(image.crop((0, start, image.width, end)))
+                
+            for i, seg in enumerate(segments):
+                is_text = is_wide_image(seg)
+                segment_obj = ProcessedImageSegment(
+                    pil_image=seg,
+                    original_url=url,
+                    segment_index=i,
+                    is_text_segment=is_text,
+                    segment_id=idx
+                )
+                processed_segments.append(segment_obj)
+        else:
+           raise ValueError("is_crop is False")
+        
+    return processed_segments
 def is_image_height_enough(image:Image.Image , threshold_height:int = 30)->bool:
     _, height = image.size
     if height < threshold_height:
         return False
     return True
 
+#REVIEW merged된 이미지를 어디에 저장할지? 추가 디렉토리 만들어서 할지, 아니면 단순히 파일만 저장할지
+def merge_segmented_images(directory, output_directory):
+    """
+    Args:
+        directory (str): The directory containing the segmented image files.
+                         Expected filename format: segment_{original_index}_{segment_index}.jpg
+        output_directory (str): The directory where merged images will be saved.
+                                Merged files will be named: merged_{original_index}.jpg
+    """
+
+    image_files = [f for f in os.listdir(directory) if f.lower().endswith('.jpg')]
+
+    if not image_files:
+        print(f"No 'segment_*.jpg' files found in the directory: {directory}")
+        return
+
+    grouped_images = defaultdict(list)
+    # pattern = re.compile(r'segment_(\d+)_(\d+)\.jpg', re.IGNORECASE)
+
+    for filename in image_files:
+        try:
+            split_name = filename.split("_")
+            if len(split_name) > 3:
+                continue
+            elif len(split_name) == 3:
+                original_index , segment_index = split_name[1:]
+                original_index , segment_index = map(int,[original_index,segment_index.split(".")[0]])
+            full_path = os.path.join(directory, filename)
+            grouped_images[original_index].append((segment_index, full_path))
+        except:
+            print(filename,"Not matched the expected pattern 'segment_X_Y.jpg'.")
 
 
+    if not grouped_images:
+        print("No valid segments found for any original image.")
+        return
 
+    # Create output directory if it doesn't exist
+    if not os.path.exists(output_directory):    
+        os.makedirs(output_directory)
+        print(f"Created output directory: {output_directory}")
+
+    # Process each group of images
+    for original_index, segments in grouped_images.items():
+        # Sort segments by segment index (the first element of the tuple)
+        segments = natsorted(segments , key=lambda x: x[0])
+
+        if len(segments) == 1:
+            print(f"Skipping original image index {original_index} as it has only one segment.")
+            continue
+
+        image_objects = []
+        total_height = 0
+        width = 0
+        # Load image objects and calculate dimensions
+        for _, img_path in segments:
+            try:
+                img = Image.open(img_path)
+                width = img.width
+                height = img.height
+                if height < 10:
+                    continue
+                # Ensure consistent width for vertical stacking
+                # width = img.width
+                # if img.width != width:
+                #     print(f"Error: Image {os.path.basename(img_path)} in group {original_index} has width {img.width}, expected {width}. Skipping group.")
+                #     valid_group = False
+                #     # Close already opened images in this group
+                #     for opened_img in image_objects:
+                #         opened_img.close()
+                #     break # Stop processing this group
+                image_objects.append(img)
+                total_height += img.height
+            except Exception as e:
+                print(f"Error opening image file {img_path}: {e}. Skipping this image.")
+                
+        if len(image_objects) == 0 or total_height < 80:
+            print(f"No valid images found for original image index {original_index}.")
+            continue
+        merged_image = Image.new(image_objects[0].mode, (width, total_height))
+
+        # Paste segments vertically
+        current_y = 0
+        for img in image_objects:
+            merged_image.paste(img, (0, current_y))
+            current_y += img.height
+            img.close() # Close the image file after pasting
+
+        # Save the merged image
+        output_filename = f"merged_{original_index}.jpg"
+        output_path = os.path.join(output_directory, output_filename)
+        try:
+            merged_image.save(output_path)
+            print(f"Successfully saved merged image: {output_path}")
+        except Exception as e:
+            print(f"Error saving merged image {output_path}: {e}")

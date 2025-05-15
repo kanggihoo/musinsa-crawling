@@ -40,7 +40,7 @@ class Crawler:
         
         # service = Service(ChromeDriverManager().install())
         self.driver = webdriver.Chrome(options=chrome_options)
-        self.wait = WebDriverWait(self.driver, 5 , poll_frequency=0.1)
+        self.wait = WebDriverWait(self.driver, 5 , poll_frequency=0.5)
     
     def go(self , url:str):
         self.driver.get(url)
@@ -71,7 +71,17 @@ class Crawler:
             element = self.wait.until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, css_selector))
             )
-            print("요소 로드 완료")
+            # print("요소 로드 완료")
+            return element
+        except Exception as e:
+            print(f"요소 로드 대기 중 오류 발생: {e}")
+            return self.error_message
+        
+    def wait_for_element_by_xpath(self, xpath:str):
+        try:
+            element = self.wait.until(
+                EC.presence_of_element_located((By.XPATH, xpath))
+            )
             return element
         except Exception as e:
             print(f"요소 로드 대기 중 오류 발생: {e}")
@@ -210,7 +220,7 @@ def get_row_product_info(soup:BeautifulSoup  , **params) -> List[Dict]:
         
         return product_list
     
-def crawl_product_list(crawler:Crawler , num_scrolls:int=None , dy:int=470, infinite_scroll:bool=False, **params)->List[Dict]:
+def crawl_product_list(crawler:Crawler , num_scrolls:int=None , dy:int=462, infinite_scroll:bool=False, **params)->List[Dict]:
     start , end = 0 , dy
     scroll_count = 0
     crawled_data = []
@@ -224,6 +234,7 @@ def crawl_product_list(crawler:Crawler , num_scrolls:int=None , dy:int=470, infi
             break
             
         soup = BeautifulSoup(target_element.get_attribute("innerHTML"), "html.parser")
+        
         product_list = get_row_product_info(soup, **params)
         crawled_data.extend(product_list)
         
@@ -231,13 +242,19 @@ def crawl_product_list(crawler:Crawler , num_scrolls:int=None , dy:int=470, infi
         time.sleep(0.2)
         # 스크롤 후 새로운 컨텐츠가 로드될 때까지 대기
         new_height = crawler.driver.execute_script("return document.body.scrollHeight") 
-        try:
-            # 다음 인덱스의 요소가 나타날 때까지 대기
-            next_element = crawler.wait_for_element_by_css_selector(f".sc-k7xv49-0.hRlVQI div[data-index='{scroll_count + 1}']")
-        except:
+        
+        # 다음 인덱스의 요소가 나타날 때까지 대기
+        next_element = crawler.wait_for_element_by_css_selector(f".sc-k7xv49-0.hRlVQI div[data-index='{scroll_count+1}']")
+        if next_element != crawler.error_message:
+            pass
+        else:
+            print("다음 인덱스 요소 없음")
             if new_height == last_height:
                 print(f"페이지 끝에 도달했습니다. 총 {scroll_count + 1}번의 스크롤 진행.")
                 break
+            else:
+                print(new_height , last_height , product_list)
+                print(f"페이지 끝에 도달하지 않았습니다. 총 {scroll_count + 1}번의 스크롤 진행.")
         
         time.sleep(0.1)
         start , end = end , end + dy
@@ -251,13 +268,14 @@ def crawl_product_list(crawler:Crawler , num_scrolls:int=None , dy:int=470, infi
     return crawled_data
 
 #FIXME : 코드 가동성 필요(리팩토링)
+#TODO : 의류 사이즈 정보 추출하는 코드 작성 필요.
 def get_product_detail_info(crawler:Crawler , product_id:str, is_process:bool = False ):
     test_url = f"https://www.musinsa.com/products/{product_id}"
     crawler.go(test_url)
 
     # Initialize data variables and status
     product_summary_images = []
-    product_details_text = crawler.error_message # Default to failed
+    product_detail_text = {}
     product_detail_images = []
     review_texts = None
     color_size_info = {}
@@ -289,22 +307,21 @@ def get_product_detail_info(crawler:Crawler , product_id:str, is_process:bool = 
         product_details_element = crawler.wait_for_element_by_css_selector("#root .sc-1bn3xag-2.uTRuH")
         if product_details_element != crawler.error_message:
             product_details_soup = BeautifulSoup(product_details_element.get_attribute("innerHTML") , "html.parser")
-            details_list = []
+            
             for e in product_details_soup.select(".sc-2ll6b5-1.dhVuFE:not(:first-child)"):
                 key_element = e.select_one("dt")
                 value_element = e.select_one("dd")
                 if key_element and value_element:
                     key = key_element.text
                     value = value_element.text
-                    details_list.append(f"{key} : {value}")
-            product_details_text = ", ".join(details_list)
+                    product_detail_text[key]= value
             crawling_status["detail_text"] = "success"
         else:
              print(f"크롤링 실패 [Section 2]: 제품 detail 영역 추출 실패 (wait_for_element)")
-             product_details_text = crawler.error_message # Ensure failed status propagates
+             product_detail_text = crawler.error_message # Ensure failed status propagates
     except Exception as e:
         print(f"크롤링 실패 [Section 2]: 제품 detail 영역에서 text 정보 추출 중 오류 발생 - {e}")
-        product_details_text = crawler.error_message
+        product_detail_text = crawler.error_message
 
     # 3. 제품과 관련된 자세한 image url 추출
     try:
@@ -382,10 +399,10 @@ def get_product_detail_info(crawler:Crawler , product_id:str, is_process:bool = 
     except Exception as e:
         print(f"크롤링 실패 [Section 4]: 제품 리뷰 내용 추출 중 오류 발생 - {e}")
         review_texts = crawler.error_message
-
-
+    #REVIEW : 굳이 제품 색상별 사이즈 정보를 추출해야 하나??? (어차피 나중에 재고 있는지 여부는 나중에 매번 확인해야 하는데?)
     # 5. 제품 색상 및 색상별 사이즈 정보 추출
     try:
+        
         select_area = crawler.wait_for_element_by_css_selector(".sc-1puoja0-0.fZdNIF .gtm-impression-content .pt-1.pb-2")
         if select_area != crawler.error_message:
             # Use find_elements which returns a list, empty if not found
@@ -442,7 +459,6 @@ def get_product_detail_info(crawler:Crawler , product_id:str, is_process:bool = 
                     print(f"크롤링 실패 [Section 5]: 색상 선택 영역 로드 실패 (wait_for_attribute_change)")
                     color_size_info = crawler.error_message
 
-
             elif is_one_color and child_divs: # Handle one color product (or structure with 1 child)
                  first_select_area = child_divs[0]
                  crawler.wait_for_clickable_element(first_select_area)
@@ -459,8 +475,9 @@ def get_product_detail_info(crawler:Crawler , product_id:str, is_process:bool = 
                          text = size_button.select_one("span").text.strip()
                          text_split = text.split()
                          if text_split:
-                             size_key = text_split[0] if text_split[0].lower() not in ["기모", "노기모"] else (text_split[1] if len(text_split) > 1 else text_split[0])
-                             color_size_info["one_color"][size_key] = "soldout" if len(text_split) >= 2 and text_split[-1] == "(품절)" else "available"
+                             is_available = True if "품절" not in text_split[-1] else False
+                             size_key = "".join(text_split) if is_available else "".join(text_split[:-1])
+                             color_size_info["one_color"][size_key] = "available" if is_available else "soldout"
                      crawling_status["color_size"] = "success"
                  else:
                      print(f"크롤링 실패 [Section 5]: 단일 색상 제품 사이즈 정보 추출 실패 (wait_for_attribute_change)")
@@ -470,13 +487,33 @@ def get_product_detail_info(crawler:Crawler , product_id:str, is_process:bool = 
                  color_size_info = crawler.error_message
 
         else:
-            print(f"크롤링 실패 [Section 5]: 색상/사이즈 선택 영역 로드 실패 (wait_for_element)")
-            color_size_info = crawler.error_message
+            print("색상/사이즈 선택 영역 예외 처리 진행")
+            area = crawler.wait_for_element_by_css_selector(".sc-1puoja0-0.fZdNIF")
+            if area.find_element(By.CSS_SELECTOR , ".sc-16dm5t2-0.ixCeVZ button span").text == "품절":
+                color_size_info = "품절"    
+                crawling_status["color_size"] = "success"
+            elif len(area.find_elements(By.CSS_SELECTOR , ".gtm-impression-content")) >= 1:
+                color_size_info = "one_size"        
+                crawling_status["color_size"] = "success"
+            else:
+                print(f"크롤링 실패 [Section 5]: 색상/사이즈 선택 영역 로드 실패 (wait_for_element)")
+                color_size_info = crawler.error_message
 
     except Exception as e:
         print(f"크롤링 실패 [Section 5]: 제품 색상/사이즈 정보 추출 중 오류 발생 - {e}")
         color_size_info = crawler.error_message
-
+        
+    # 6. 제품 실제 사이즈 정보 추출
+    # 우선 제품 버튼을 눌러서 이동 한 뒤 사이즈 정보 추출 ? 
+    # 사이즈 섹션 : //*[@id="root"]/div[1]/div[1]/div[4]
+    # //*[@id="root"]/div[1]/div[1]/div[4]/div/div[3]
+    # //*[@id="root"]/div[1]/div[1]/div[4]/div/div[3]/div[2]
+    # 사이즈 정보가 있는 위치 : root > div.sc-3weaze-0.cBNetp > div.sc-4n9q35-0.cAlKzU > div:nth-child(5) > div > div.sc-1jg999i-0.eBWLth > div.sc-1jg999i-1.gOifnz
+    # 테이블 : //*[@id="root"]/div[1]/div[1]/div[4]/div/div[3]/div[2]/div/table
+    
+    
+    
+    
     # Process images only if crawling was successful
     # if is_process:
     #     if crawling_status["summary_images"] == "success" and isinstance(product_summary_images, list):
@@ -488,7 +525,7 @@ def get_product_detail_info(crawler:Crawler , product_id:str, is_process:bool = 
         "product_id": product_id,
         "product_summary_images": product_summary_images,
         "product_detail_images": product_detail_images,
-        "product_details_text": product_details_text,
+        "product_detail_text": product_detail_text,
         "review_texts": review_texts,
         "color_size_info": color_size_info,
         "crawling_status": crawling_status, # Include the status dictionary
