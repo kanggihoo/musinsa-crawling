@@ -274,9 +274,9 @@ def get_product_detail_info(crawler:Crawler , product_id:str, is_process:bool = 
     crawler.go(test_url)
 
     # Initialize data variables and status
-    product_summary_images = []
-    product_detail_text = {}
-    product_detail_images = []
+    summary_images = []
+    detail_text = {}
+    detail_images = []
     review_texts = None
     color_size_info = {}
     crawling_status = {
@@ -293,14 +293,14 @@ def get_product_detail_info(crawler:Crawler , product_id:str, is_process:bool = 
         if product_summary != crawler.error_message:
             product_summary_soup = BeautifulSoup(product_summary.get_attribute("innerHTML") , "html.parser")
             for image in product_summary_soup.select("img"):
-                product_summary_images.append(image.get("src"))
+                summary_images.append(image.get("src"))
             crawling_status["summary_images"] = "success"
         else:
-            product_summary_images = crawler.error_message # Ensure failed status propagates
+            summary_images = crawler.error_message # Ensure failed status propagates
             print(f"크롤링 실패 [Section 1]: 제품 preview 이미지 url 추출 실패 (wait_for_element)")
     except Exception as e:
         print(f"크롤링 실패 [Section 1]: 제품 preview 이미지 url 추출 중 오류 발생 - {e}")
-        product_summary_images = crawler.error_message
+        summary_images = crawler.error_message
 
     # 2. 제품 detail 영역에서 text 정보 추출(성별 , 시즌 , 조회수 등)
     try:
@@ -314,14 +314,14 @@ def get_product_detail_info(crawler:Crawler , product_id:str, is_process:bool = 
                 if key_element and value_element:
                     key = key_element.text
                     value = value_element.text
-                    product_detail_text[key]= value
+                    detail_text[key]= value
             crawling_status["detail_text"] = "success"
         else:
              print(f"크롤링 실패 [Section 2]: 제품 detail 영역 추출 실패 (wait_for_element)")
-             product_detail_text = crawler.error_message # Ensure failed status propagates
+             detail_text = crawler.error_message # Ensure failed status propagates
     except Exception as e:
         print(f"크롤링 실패 [Section 2]: 제품 detail 영역에서 text 정보 추출 중 오류 발생 - {e}")
-        product_detail_text = crawler.error_message
+        detail_text = crawler.error_message
 
     # 3. 제품과 관련된 자세한 image url 추출
     try:
@@ -331,26 +331,26 @@ def get_product_detail_info(crawler:Crawler , product_id:str, is_process:bool = 
             product_details_soup_for_images = BeautifulSoup(product_details_element.get_attribute("innerHTML") , "html.parser")
             for image in product_details_soup_for_images.select("div:last-child img"):
                  image_url = image.get("src")
-                 product_detail_images.append(image_url)
+                 detail_images.append(image_url)
             crawling_status["detail_images"] = "success"
         elif product_details_element == crawler.error_message:
              print(f"크롤링 실패 [Section 3]: 제품 상세 이미지 추출 실패 (Section 2 실패로 인한 의존성)")
-             product_detail_images = crawler.error_message
+             detail_images = crawler.error_message
         else: # Attempt to refetch if section 2 failed but element might be available
             product_details_refetch = crawler.wait_for_element_by_css_selector("#root .sc-1bn3xag-2.uTRuH")
             if product_details_refetch != crawler.error_message:
                 product_details_soup_refetch = BeautifulSoup(product_details_refetch.get_attribute("innerHTML") , "html.parser")
                 for image in product_details_soup_refetch.select("div:last-child img"):
                      image_url = image.get("src")
-                     product_detail_images.append(image_url)
+                     detail_images.append(image_url)
                 crawling_status["detail_images"] = "success"
             else:
                  print(f"크롤링 실패 [Section 3]: 제품 상세 이미지 추출 실패 (Refetch 실패)")
-                 product_detail_images = crawler.error_message
+                 detail_images = crawler.error_message
 
     except Exception as e:
         print(f"크롤링 실패 [Section 3]: 제품과 관련된 자세한 image url 추출 중 오류 발생 - {e}")
-        product_detail_images = crawler.error_message
+        detail_images = crawler.error_message
 
 
     # 4. 제품 리뷰 내용 추출
@@ -400,6 +400,7 @@ def get_product_detail_info(crawler:Crawler , product_id:str, is_process:bool = 
         print(f"크롤링 실패 [Section 4]: 제품 리뷰 내용 추출 중 오류 발생 - {e}")
         review_texts = crawler.error_message
     #REVIEW : 굳이 제품 색상별 사이즈 정보를 추출해야 하나??? (어차피 나중에 재고 있는지 여부는 나중에 매번 확인해야 하는데?)
+    #TODO 색상이 어떤게 있는지와 사이즈 정보만 추출 하는게 좋아보이는데 
     # 5. 제품 색상 및 색상별 사이즈 정보 추출
     try:
         
@@ -409,6 +410,7 @@ def get_product_detail_info(crawler:Crawler , product_id:str, is_process:bool = 
             child_divs = select_area.find_elements(By.CSS_SELECTOR, ":scope > div")
             is_one_color = len(child_divs) <= 1 # Check if 0 or 1 child div
 
+            # 누르는 버튼이 2개 이상인경우 (사이즈 , 색상 정보 모두 있음.)
             if not is_one_color and len(child_divs) >= 2: # Need at least 2 divs for multiple colors scenario
                 first_select_area = child_divs[0] # Use the found elements
                 second_select_area = child_divs[1]
@@ -458,7 +460,8 @@ def get_product_detail_info(crawler:Crawler , product_id:str, is_process:bool = 
                 else:
                     print(f"크롤링 실패 [Section 5]: 색상 선택 영역 로드 실패 (wait_for_attribute_change)")
                     color_size_info = crawler.error_message
-
+                    
+            # 누르는 버튼이 1개 인경우 (사이즈 정보만 있음.)
             elif is_one_color and child_divs: # Handle one color product (or structure with 1 child)
                  first_select_area = child_divs[0]
                  crawler.wait_for_clickable_element(first_select_area)
@@ -504,13 +507,7 @@ def get_product_detail_info(crawler:Crawler , product_id:str, is_process:bool = 
         color_size_info = crawler.error_message
         
     # 6. 제품 실제 사이즈 정보 추출
-    # 우선 제품 버튼을 눌러서 이동 한 뒤 사이즈 정보 추출 ? 
-    # 사이즈 섹션 : //*[@id="root"]/div[1]/div[1]/div[4]
-    # //*[@id="root"]/div[1]/div[1]/div[4]/div/div[3]
-    # //*[@id="root"]/div[1]/div[1]/div[4]/div/div[3]/div[2]
-    # 사이즈 정보가 있는 위치 : root > div.sc-3weaze-0.cBNetp > div.sc-4n9q35-0.cAlKzU > div:nth-child(5) > div > div.sc-1jg999i-0.eBWLth > div.sc-1jg999i-1.gOifnz
-    # 테이블 : //*[@id="root"]/div[1]/div[1]/div[4]/div/div[3]/div[2]/div/table
-    
+
     
     
     
@@ -523,9 +520,9 @@ def get_product_detail_info(crawler:Crawler , product_id:str, is_process:bool = 
     success_status = "success" if all([status == "success" for status in crawling_status.values()]) else "failed"
     result = {
         "product_id": product_id,
-        "product_summary_images": product_summary_images,
-        "product_detail_images": product_detail_images,
-        "product_detail_text": product_detail_text,
+        "summary_images": summary_images,
+        "detail_images": detail_images,
+        "detail_text": detail_text,
         "review_texts": review_texts,
         "color_size_info": color_size_info,
         "crawling_status": crawling_status, # Include the status dictionary
