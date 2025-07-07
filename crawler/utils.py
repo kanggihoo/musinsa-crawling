@@ -1,11 +1,54 @@
-from PIL import Image , ImageDraw
+from PIL import Image , ImageOps
 import numpy as np
 import requests
 from io import BytesIO
 from pathlib import Path
 from typing import List , Dict , Optional , Tuple 
 import pandas as pd
-import shutil
+import os
+import logging
+
+# 로그 설정
+def setup_logger(name:str="crawler" , file_name: str = "crawling.log"):
+    """
+    Sets up a logger with different levels for file and console handlers.
+    - File handler logs ERROR and higher level messages.
+    - Console handler logs WARNING and higher level messages.
+    """
+    # 로거 인스턴스를 가져옵니다. 고정된 이름을 사용하여 항상 동일한 로거를 사용합니다.
+    logger = logging.getLogger(name)
+
+    # 핸들러가 이미 설정된 경우, 중복 로깅을 방지하기 위해 기존 로거를 반환합니다.
+    if logger.hasHandlers():
+        return logger
+
+    # 로거가 처리할 최저 로그 레벨을 설정합니다. 핸들러 레벨 중 가장 낮은 값으로 설정해야 합니다.
+    logger.setLevel(logging.INFO)  # WARNING < ERROR
+
+    log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    
+    log_file = os.path.join(log_dir, file_name)
+    
+    formatter = logging.Formatter(
+        '%(asctime)s [%(levelname)s] %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+
+    # 콘솔 출력을 위한 StreamHandler 설정 (WARNING 레벨 이상)
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(logging.INFO)
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(stream_handler)
+    
+    # 파일 저장을 위한 FileHandler 설정 (ERROR 레벨 이상)
+    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    file_handler.setLevel(logging.ERROR)
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    
+    return logger
 
 def concat_images_horizontally_centered(images):
     # images: PIL.Image 리스트
@@ -107,31 +150,50 @@ def make_dir(dir_path:str)->None:
 
 
 #FIXME : 여기에 들어오는 data가 기존의 df와 동일하다는 보장이 없음
-def add_data_to_dataframe(data:List[Dict], df:pd.DataFrame):
-    result_df = pd.concat([df , pd.DataFrame(data)])
-    return result_df
+def add_data_to_dataframe(df: pd.DataFrame, data_list: List[Dict]) -> pd.DataFrame:
+    """
+    주어진 데이터프레임에 새로운 데이터 목록을 추가합니다.
+    
+    Args:
+        df (pd.DataFrame): 원본 데이터프레임
+        data_list (List[Dict]): 추가할 데이터 목록 (각 딕셔너리는 행을 나타냄)
+        
+    Returns:
+        pd.DataFrame: 데이터가 추가된 새로운 데이터프레임
+    """
+    if not data_list:
+        return df
+    
+    new_df = pd.DataFrame(data_list)
+    return pd.concat([df, new_df], ignore_index=True)
 
-def save_dataframe_to_csv(df:pd.DataFrame , csv_path:str, index_column:Optional[str]=None):
-    if isinstance(csv_path, Path):
-        csv_path = str(csv_path)
-    if index_column is not None:
-        if index_column not in df.columns:
-            raise ValueError(f"dataframe 내에 {index_column} 열이 존재하지 않음")
-        df_to_save = df.set_index(index_column)
-        df_to_save.to_csv(csv_path)
-    else:
-        df.to_csv(csv_path , index=True)
+def save_dataframe_to_csv(df: pd.DataFrame, file_path: Path, mode: str = 'w'):
+    """
+    데이터프레임을 CSV 파일로 저장합니다.
+    
+    Args:
+        df (pd.DataFrame): 저장할 데이터프레임
+        file_path (Path): 저장할 파일 경로
+        index_column (str, optional): 인덱스로 사용할 컬럼명. Defaults to None.
+        mode (str, optional): 파일 쓰기 모드 ('w' for write, 'a' for append). Defaults to 'w'.
+    """
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+
+        
+    df.to_csv(file_path, mode=mode, index=False, encoding='utf-8-sig')
+    # print(f"데이터프레임을 '{file_path}'에 저장했습니다.")
+
 def load_dataframe_from_csv(csv_path:str)->pd.DataFrame:
     return pd.read_csv(csv_path,encoding="utf-8")
 
 #FIXME : 이미지 저장하는 코드 왜케 지저분 해보이지 
-def save_image_as_jpg(image: Image.Image, save_path: str) -> None:
+def save_image_as_jpg(image: Image.Image, save_path: str, target_size: int = None) -> None:
     """
-    Safely save a PIL image to JPG format regardless of its original mode
-    
+    원본 이미지의 비율은 유지하면서 가장 긴 변을 target_size로 고정 
     Args:
         image (PIL.Image.Image): PIL Image object to save
         save_path (str): Path where to save the JPG file
+        target_size (tuple, optional): Target size (width, height) for resizing with padding
     """
     
     #Convert RGBA images to RGB
@@ -152,6 +214,11 @@ def save_image_as_jpg(image: Image.Image, save_path: str) -> None:
     # Convert L (grayscale) to RGB
     elif image.mode == 'L':
         image = image.convert('RGB')
+    
+    # Apply target_size with padding if specified
+    if target_size is not None:
+        image.thumbnail((target_size , target_size) , Image.LANCZOS)
+        
     
     # Save the image
     try:

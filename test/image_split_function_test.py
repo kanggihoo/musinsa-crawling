@@ -1,7 +1,7 @@
 import numpy as np
 from PIL import Image
 import _path_utils
-from crawler.preprocess import image_preprocess ,save_segments , get_white_rows  , split_image_by_white_rows , get_pil_image_from_url , ProcessedImageSegment , is_wide_image
+from crawler.preprocess import  get_white_rows  , split_image_by_white_rows , get_pil_image_from_url , ProcessedImageSegment , is_wide_image
 
 
 

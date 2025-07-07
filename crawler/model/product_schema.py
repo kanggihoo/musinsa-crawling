@@ -1,4 +1,4 @@
-# models/product_schema.py
+c;# models/product_schema.py
 from datetime import datetime
 from typing import Dict, Any, Optional # 타입 힌트를 위해 임포트
 
