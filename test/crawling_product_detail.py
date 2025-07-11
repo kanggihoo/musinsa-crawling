@@ -295,11 +295,11 @@ CATEGORY = [
 def main():
     """메인 실행 함수"""
     logger = setup_logger(file_name="crawling_product_detail.log")
-    crawler = Crawler(base_url="https://www.musinsa.com/products", headless=True)
+    crawler = Crawler(base_url="https://www.musinsa.com/products", headless=False)
     
     BASE_DIR = Path("./")
     DATA_DIR = BASE_DIR / "data"
-    main_category , sub_category = "상의" , "피케-카라티셔츠"
+    main_category , sub_category = "상의" , "맨투맨-스웨트"
     CSV_FILE_NAME = f"musinsa_product_summary_{main_category}_{sub_category}.csv"
     INPUT_CSV_FILE_NAME = DATA_DIR / CSV_FILE_NAME
     OUTPUT_FILE_PREFIX = f"musinsa_product_detail_{main_category}_{sub_category}"
