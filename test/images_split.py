@@ -10,7 +10,7 @@ import os
 if __name__ == "__main__":
     # JSON 파일을 읽은뒤 진행
     logger = setup_logger(name ="image_split" , file_name="image_split.log")
-    with open("./data/musinsa_product_detail_상의_셔츠-블라우스_.json" , "r" , encoding="utf-8") as f:
+    with open("./data/musinsa_product_detail_상의_셔츠-블라우스.json" , "r" , encoding="utf-8") as f:
         data = json.load(f)
     
     # data = next(iter(d for d in data if d["product_id"] == "4946821"))

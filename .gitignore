@@ -1,4 +1,16 @@
 .DS_Store
 *__pycache__
 /logs
-/data
+/venv
+/TOP
+.vscode
+.env
+exclude_id.txt
+json_file_analyze.ipynb
+tmp.py
+zero_shot_cls/requirements.txt
+zero_shot_cls/main.py
+test_case_product.txt
+data/test_data.json
+zero_shot_cls/musinsa_product_detail_상의_후드티셔츠_.json
+data/*detail*
