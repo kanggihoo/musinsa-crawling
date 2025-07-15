@@ -3,6 +3,7 @@
 /logs
 /venv
 /TOP
+/BOTTOM
 .vscode
 .env
 exclude_id.txt
