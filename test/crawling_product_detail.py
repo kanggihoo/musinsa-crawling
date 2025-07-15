@@ -295,16 +295,16 @@ CATEGORY = [
 def main():
     """메인 실행 함수"""
     logger = setup_logger(file_name="crawling_product_detail.log")
-    crawler = Crawler(base_url="https://www.musinsa.com/products", headless=False)
+    crawler = Crawler(base_url="https://www.musinsa.com/products", headless=True)
     
     BASE_DIR = Path("./")
     DATA_DIR = BASE_DIR / "data"
-    main_category , sub_category = "상의" , "맨투맨-스웨트"
+    main_category , sub_category = "하의" , "데님팬츠"
     CSV_FILE_NAME = f"musinsa_product_summary_{main_category}_{sub_category}.csv"
     INPUT_CSV_FILE_NAME = DATA_DIR / CSV_FILE_NAME
-    OUTPUT_FILE_PREFIX = f"musinsa_product_detail_{main_category}_{sub_category}"
+    OUTPUT_FILE_PREFIX = f"musinsa_product_detail_{main_category}_{sub_category}_1"
     
-
+    #TODO : 디테일 크롤링도 청크단위로 파일 만들고 합치는게 좋아보임 
     try:
         summary_df = pd.read_csv(INPUT_CSV_FILE_NAME, dtype={'product_id': str})
     except FileNotFoundError:
@@ -313,7 +313,7 @@ def main():
 
     crawled_details, unavailable_products = [], []
     
-
+    summary_df = summary_df.iloc[15000:]
     crawled_details, unavailable_products = crawl_product_details(summary_df, crawler, logger)
 
     crawler.close()
