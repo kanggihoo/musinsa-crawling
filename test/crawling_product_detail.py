@@ -299,7 +299,7 @@ def main():
     
     BASE_DIR = Path("./")
     DATA_DIR = BASE_DIR / "data"
-    main_category , sub_category = "상의" , "피케-카라티셔츠"
+    main_category , sub_category = "하의" , "데님팬츠"
     CSV_FILE_NAME = f"musinsa_product_summary_{main_category}_{sub_category}.csv"
     INPUT_CSV_FILE_NAME = DATA_DIR / CSV_FILE_NAME
     OUTPUT_FILE_PREFIX = f"musinsa_product_detail_{main_category}_{sub_category}"

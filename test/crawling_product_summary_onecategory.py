@@ -72,7 +72,7 @@ SAVE_DIR = Path("./data")
 CHUNK_SIZE = 100  # 한 번에 처리할 데이터 수
 
 try:
-    category = CATEGORY[10]
+    category = CATEGORY[9]
     main_code , sub_code = category.get("category_main") , category.get("category_sub")
     
             
