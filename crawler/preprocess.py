@@ -12,9 +12,10 @@ from urllib.parse import quote , urlparse
 from dataclasses import dataclass , field
 import asyncio
 import aiohttp
-
 from .utils import make_dir , save_image_as_jpg
+from typing import Tuple
 
+logger = logging.getLogger(__name__)
 # Define a class to hold processed image segment information
 @dataclass
 class ImageMetadata:
@@ -40,24 +41,32 @@ class ImageData:
     target_size : int = 512
     
     def __post_init__(self):
-        self.HOME_DIR = os.path.dirname(os.path.dirname(__file__))
-        self.BASE_DIR = f"{self.HOME_DIR}/{self.category_main}/{self.category_sub}/{self.product_id}"
-        self.SUMMARY_IMAGE_DIR = f"{self.BASE_DIR}/summary"
-        self.DETAIL_IMAGE_DIR = f"{self.BASE_DIR}/detail"
-        self.SEGMENT_IMAGE_DIR = f"{self.BASE_DIR}/segment"
-        self.TEXT_IMAGE_DIR = f"{self.BASE_DIR}/text"
+        self.HOME_DIR = Path(__file__).parent.parent
+        self.BASE_DIR = self.HOME_DIR / str(self.category_main) / str(self.category_sub) / str(self.product_id)
+        
+        self.SUMMARY_IMAGE_DIR = self.BASE_DIR / "summary"
+        self.DETAIL_IMAGE_DIR = self.BASE_DIR / "detail"
+        self.SEGMENT_IMAGE_DIR = self.BASE_DIR / "segment"
+        self.TEXT_IMAGE_DIR = self.BASE_DIR / "text"
 
-        if not os.path.exists(self.SUMMARY_IMAGE_DIR):
-            os.makedirs(self.SUMMARY_IMAGE_DIR)
-        if not os.path.exists(self.DETAIL_IMAGE_DIR):
-            os.makedirs(self.DETAIL_IMAGE_DIR)
-        if not os.path.exists(self.SEGMENT_IMAGE_DIR):
-            os.makedirs(self.SEGMENT_IMAGE_DIR)
-        if not os.path.exists(self.TEXT_IMAGE_DIR):
-            os.makedirs(self.TEXT_IMAGE_DIR)
+    async def create_all_directories(self) :
+        await asyncio.gather(
+            self._create_single_directory_async(self.SUMMARY_IMAGE_DIR),
+            self._create_single_directory_async(self.DETAIL_IMAGE_DIR),
+            self._create_single_directory_async(self.SEGMENT_IMAGE_DIR),
+            self._create_single_directory_async(self.TEXT_IMAGE_DIR)
+        )
     
-    def __repr__(self):
-        ...
+    async def _create_single_directory_async(self, path: Path):
+        """단일 디렉토리를 비동기적으로 생성"""
+        await asyncio.to_thread(self._create_single_directory, path)
+    
+    def _create_single_directory(self, path: Path):
+        """단일 디렉토리를 동기적으로 생성"""
+        path.mkdir(parents=True, exist_ok=True)
+        
+        
+
     
 
 def is_wide_image(image:Image.Image , threshold_ratio: float = 8.0) -> bool:
@@ -140,10 +149,10 @@ async def get_pil_image_from_url_async(session: aiohttp.ClientSession, url: str 
             pil_image = Image.open(image_stream).convert("RGB")
             return pil_image
     except Exception as e:
-        print(f"Async 이미지 다운로드 실패: {url}")
+        logger.error(f"Async 이미지 다운로드 실패: {url} , 에러: {str(e)}")
         return None
     
-async def _download_images_async(image_urls:list[str]):
+async def _download_images_async(image_urls:list[str])->list[Image.Image | None]:
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36"
     }
@@ -151,9 +160,8 @@ async def _download_images_async(image_urls:list[str]):
         tasks = [get_pil_image_from_url_async(session, url, headers) for url in image_urls]
         return await asyncio.gather(*tasks)
 
-def save_summary_images(
+async def save_summary_images_async(
    process:ImageData,
-   logger:logging.Logger,
 ) -> tuple[int, int]:
     
     urls=process.summary_images_url
@@ -161,8 +169,8 @@ def save_summary_images(
     image_suffix=process.image_suffix
     product_id=process.product_id
 
-    downloaded_images = asyncio.run(_download_images_async(urls))
     total_images = len(urls)
+    downloaded_images = await _download_images_async(urls)
     success_count = sum(1 for img in downloaded_images if img is not None)
 
     for idx, image in enumerate(downloaded_images):
@@ -512,8 +520,7 @@ def get_white_rows(image:Image.Image , mean_threshold = 230, dark_threshold = 20
             
 #     return processed_segments
 
-def image_segmentation(process : ImageData ,
-                         logger:logging.Logger,
+async def image_segmentation_async(process : ImageData ,
                          min_content_height: int = 20,
                          min_white_gap: int = 3,
                          padding: int = 5
@@ -523,60 +530,93 @@ def image_segmentation(process : ImageData ,
     Uses asyncio internally to download images concurrently.
     """
     
-
-
-    downloaded_images = asyncio.run(_download_images_async(process.detail_images_url))
+    downloaded_images = await _download_images_async(process.detail_images_url)
     
     success_count = sum(1 for img in downloaded_images if img is not None)
     total_count = len(process.detail_images_url)
     logger.info(f"[{process.product_id}] 상세 이미지 다운로드 완료 ({success_count}/{total_count} 성공).")
 
+    tasks = []
     for image_idx, image in enumerate(downloaded_images):
         if image is None:
             continue
-        process.detail_images.append(ImageMetadata(pil_image=image, image_idx=image_idx))
         
-        # 흰색 행 찾기
-        white_rows = get_white_rows(image)
-        # 컨텐츠 영역 찾기
-        content_regions = find_content_regions(white_rows)
-        # 이미지 분할 영역 계산
-        split_regions = process_content_regions(
-            content_regions, 
-            image.height, 
-            min_content_height, 
-            min_white_gap, 
-            padding
-        )
-        
-        for i, (start , end) in enumerate(split_regions):
-            if start == end:
-                continue
-            seg = image.crop((0, start, image.width, end))  
-            is_text = is_wide_image(seg)
-            segment_obj = ImageMetadata(
-                pil_image=seg,
-                image_idx=image_idx,
-                segment_idx=i,
-                is_text_segment=is_text
-            )
-            process.segmented_img.append(segment_obj)
+        task = process_single_image_async(image , image_idx , process , min_content_height , min_white_gap , padding)
+        tasks.append(task)
+    
+    if tasks:
+        await asyncio.gather(*tasks)
 
-def save_detail_images(process:ImageData , logger:logging.Logger=None):
+async def process_single_image_async(image:Image.Image , image_idx:int , process:ImageData , min_content_height:int , min_white_gap:int , padding:int)->list[Tuple[Image.Image , bool]]:
+    """
+    단일 이미지를 컨텐츠 기반으로 분할
+    """
+    process.detail_images.append(ImageMetadata(pil_image=image, image_idx=image_idx))
+    
+    
+    segments = await asyncio.to_thread(segment_image_by_content, image , min_content_height , min_white_gap , padding)
+    
+    for segment_idx ,(segment_image , is_text) in enumerate(segments):
+        segment_obj = ImageMetadata(
+            pil_image=segment_image,
+            image_idx=image_idx,
+            segment_idx=segment_idx,
+            is_text_segment=is_text
+        )
+        process.segmented_img.append(segment_obj)
+    
+        
+    
+def segment_image_by_content(image:Image.Image , min_content_height:int , min_white_gap:int , padding:int)->list[Tuple[Image.Image , bool]]:
+    """이미지를 컨텐츠 기반으로 분할
+    Returns:
+        list[Tuple[Image.Image , bool]]: [분활된 이미지, ist_text_segment]
+    """
+    segments = []
+    # 흰색 영역 찾기
+    white_rows = get_white_rows(image)
+    
+    # 컨텐츠 영역 찾기
+    content_regions = find_content_regions(white_rows)
+    
+    # 이미지 분할 영역 계산
+    split_regions = process_content_regions(
+        content_regions, 
+        image.height, 
+        min_content_height, 
+        min_white_gap, 
+        padding
+    )
+    for i, (start , end) in enumerate(split_regions):
+        if start == end:
+            continue
+        seg = image.crop((0, start, image.width, end))  
+        is_text = is_wide_image(seg)
+        segments.append((seg, is_text))
+    
+    return segments
+    
+
+
+async def save_detail_images_async(process:ImageData):
     # 원본 detail 이미지 저장
+    save_tasks = []
     for img in process.detail_images:
-        save_path = f"{process.DETAIL_IMAGE_DIR}/{img.image_idx}.{process.image_suffix}"
-        save_image_as_jpg(img.pil_image, save_path)
+        save_path = process.DETAIL_IMAGE_DIR/ f"{img.image_idx}.{process.image_suffix}"
+        task = asyncio.to_thread(save_image_as_jpg, img.pil_image, save_path)
+        save_tasks.append(task)
         
     # 분할된 이미지 저장
     for seg in process.segmented_img:
         if seg.is_text_segment:
-            save_path = f"{process.TEXT_IMAGE_DIR}/{seg.image_idx}_{seg.segment_idx}.{process.image_suffix}"
-            save_image_as_jpg(seg.pil_image, save_path , process.target_size)
+            save_path = process.TEXT_IMAGE_DIR/ f"{seg.image_idx}_{seg.segment_idx}.{process.image_suffix}"
         else:
-            save_path = f"{process.SEGMENT_IMAGE_DIR}/{seg.image_idx}_{seg.segment_idx}.{process.image_suffix}"
-            save_image_as_jpg(seg.pil_image, save_path , process.target_size)
-    
+            save_path = process.SEGMENT_IMAGE_DIR/ f"{seg.image_idx}_{seg.segment_idx}.{process.image_suffix}"
+            
+        save_tasks.append(asyncio.to_thread(save_image_as_jpg, seg.pil_image, save_path , process.target_size))
+    if save_tasks:
+        await asyncio.gather(*save_tasks)
+        
     logger.info(f"save_detail_images completed! "
                 f"[detail images : {len(process.detail_images)}, segmented images : {len(process.segmented_img)}]")
 
@@ -586,8 +626,8 @@ def is_image_height_enough(image:Image.Image , threshold_height:int = 30)->bool:
         return False
     return True
 
-#REVIEW merged된 이미지를 어디에 저장할지? 추가 디렉토리 만들어서 할지, 아니면 단순히 파일만 저장할지
-def merge_segmented_images(directory , target_size: int = None):
+
+def merge_segmented_images(directory , target_size: int|None = None):
     """
     Args:
         directory (str): The directory containing the segmented image files.
