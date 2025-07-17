@@ -69,7 +69,7 @@ def process_single_product(product_data,  idx , logger):
 if __name__ == "__main__":
     # JSON 파일을 읽은뒤 진행
     logger = setup_logger(name ="image_split" , file_name="image_split.log")
-    with open("./data/musinsa_product_detail_하의_데님팬츠.json" , "r" , encoding="utf-8") as f:
+    with open("./data/musinsa_product_detail_상의_셔츠-블라우스.json" , "r" , encoding="utf-8") as f:
         data = json.load(f)
 
     max_num_workers = 4
