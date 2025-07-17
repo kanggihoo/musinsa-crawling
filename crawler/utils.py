@@ -32,7 +32,7 @@ def setup_logger(name:str="crawler" , file_name: str = "crawling.log"):
     log_file = os.path.join(log_dir, file_name)
     
     formatter = logging.Formatter(
-        '%(asctime)s [%(levelname)s] %(message)s',
+        '%(asctime)s [%(levelname)s] %(message)s (%(filename)s:%(lineno)d)',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
 
@@ -187,7 +187,7 @@ def load_dataframe_from_csv(csv_path:str)->pd.DataFrame:
     return pd.read_csv(csv_path,encoding="utf-8")
 
 #FIXME : 이미지 저장하는 코드 왜케 지저분 해보이지 
-def save_image_as_jpg(image: Image.Image, save_path: str, target_size: int = None) -> None:
+def save_image_as_jpg(image: Image.Image, save_path: str|Path, target_size: int = None) -> None:
     """
     원본 이미지의 비율은 유지하면서 가장 긴 변을 target_size로 고정 
     Args:
