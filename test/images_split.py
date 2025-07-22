@@ -2,15 +2,22 @@ import _path_utils
 from crawler.preprocess import save_summary_images_async , ImageData , image_segmentation_async , save_detail_images_async , merge_segmented_images
 import json
 from crawler.constants import MIN_CONTENT_HEIGHT , MIN_WHITE_GAP , PADDING
-from crawler.utils import setup_logger
+from crawler.utils import set_error_logger
 from tqdm import tqdm
 import os
-import concurrent.futures
-from concurrent.futures import ThreadPoolExecutor
-import logging
 import asyncio
+import logging 
 
-logger = setup_logger(name="image_split", file_name="image_split.log")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s => [%(filename)s:%(lineno)d]',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    handlers=[
+        logging.StreamHandler(),
+    ]
+)
+logger = logging.getLogger(__name__)
 
 async def process_single_product(product_data,  idx ):
     try:
@@ -93,9 +100,10 @@ async def main():
     # 로거 설정
     
     # 데이터 로드
-    with open("./data/musinsa_product_detail_상의_민소매티셔츠.json", "r", encoding="utf-8") as f:
+    with open("./data/musinsa_product_detail_상의_셔츠-블라우스.json", "r", encoding="utf-8") as f:
         data = json.load(f)
     
+    data = data[50:151]
     logger.info(f"총 데이터 개수: {len(data)}")
     
     # 설정

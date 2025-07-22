@@ -12,10 +12,11 @@ from urllib.parse import quote , urlparse
 from dataclasses import dataclass , field
 import asyncio
 import aiohttp
-from .utils import make_dir , save_image_as_jpg
+from .utils import make_dir , save_image_as_jpg , set_error_logger
 from typing import Tuple
 
 logger = logging.getLogger(__name__)
+logger_error = set_error_logger(__name__+".error" , "logs/images_split.log")
 # Define a class to hold processed image segment information
 @dataclass
 class ImageMetadata:
@@ -86,54 +87,54 @@ def move_files(image_paths: list[str]| str, output_dirs:str) -> None:
         # print(f"Moved {filename} to {category} images directory")
 
 # FIXME : 여기 부분 비동기 처리로??
-def get_pil_image_from_url(url:str)-> Image.Image | None:
-    # url 문자열 전처리 
-    if url.startswith("//"):
-        url = "https:" + url
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36"
-    }
+# def get_pil_image_from_url(url:str)-> Image.Image | None:
+#     # url 문자열 전처리 
+#     if url.startswith("//"):
+#         url = "https:" + url
+#     headers = {
+#         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36"
+#     }
     
-    try:
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()  # HTTP 에러 발생시 예외 발생
-        if response.status_code != 200:
-            raise requests.exceptions.HTTPError(f"HTTP {response.status_code}: {response.reason}")
-        image_stream = BytesIO(response.content)
-        # image_array = np.frombuffer(image_stream.read(), np.uint8)
-        pil_image = Image.open(image_stream).convert("RGB")
-        return pil_image
-    except requests.exceptions.RequestException as e:
-        print(f"이미지 다운로드 실패: {url}, 에러: {str(e)}")
-        return None
+#     try:
+#         response = requests.get(url, headers=headers, timeout=10)
+#         response.raise_for_status()  # HTTP 에러 발생시 예외 발생
+#         if response.status_code != 200:
+#             raise requests.exceptions.HTTPError(f"HTTP {response.status_code}: {response.reason}")
+#         image_stream = BytesIO(response.content)
+#         # image_array = np.frombuffer(image_stream.read(), np.uint8)
+#         pil_image = Image.open(image_stream).convert("RGB")
+#         return pil_image
+#     except requests.exceptions.RequestException as e:
+#         print(f"이미지 다운로드 실패: {url}, 에러: {str(e)}")
+#         return None
 
 
-def save_image_from_url(url: str, save_path: str) -> bool:
-    """
-    URL에서 이미지를 다운로드하여 지정된 경로에 저장합니다.
-    """
-    # url 문자열 전처리 
-    if url.startswith("//"):
-        url = "https:" + url
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36"
-    }
+# def save_image_from_url(url: str, save_path: str) -> bool:
+#     """
+#     URL에서 이미지를 다운로드하여 지정된 경로에 저장합니다.
+#     """
+#     # url 문자열 전처리 
+#     if url.startswith("//"):
+#         url = "https:" + url
+#     headers = {
+#         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36"
+#     }
     
-    try:
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()  # HTTP 에러 발생시 예외 발생
-        if response.status_code != 200:
-            raise requests.exceptions.HTTPError(f"HTTP {response.status_code}: {response.reason}")
+#     try:
+#         response = requests.get(url, headers=headers, timeout=10)
+#         response.raise_for_status()  # HTTP 에러 발생시 예외 발생
+#         if response.status_code != 200:
+#             raise requests.exceptions.HTTPError(f"HTTP {response.status_code}: {response.reason}")
         
-        # 이미지를 PIL Image로 변환 후 저장
-        image_stream = BytesIO(response.content)
-        pil_image = Image.open(image_stream).convert("RGB")
-        pil_image.save(save_path, "JPEG", quality=95)
-        return True
+#         # 이미지를 PIL Image로 변환 후 저장
+#         image_stream = BytesIO(response.content)
+#         pil_image = Image.open(image_stream).convert("RGB")
+#         pil_image.save(save_path, "JPEG", quality=95)
+#         return True
         
-    except Exception as e:
-        print(f"이미지 다운로드 실패: {url}, 에러: {str(e)}")
-        return False
+#     except Exception as e:
+#         print(f"이미지 다운로드 실패: {url}, 에러: {str(e)}")
+#         return False
 
 async def get_pil_image_from_url_async(session: aiohttp.ClientSession, url: str , headers:dict) -> Image.Image | None:
     """
@@ -149,7 +150,7 @@ async def get_pil_image_from_url_async(session: aiohttp.ClientSession, url: str 
             pil_image = Image.open(image_stream).convert("RGB")
             return pil_image
     except Exception as e:
-        logger.error(f"Async 이미지 다운로드 실패: {url} , 에러: {str(e)}")
+        logger_error.error(f"Async 이미지 다운로드 실패 : {url} , 에러: {str(e)}")
         return None
     
 async def _download_images_async(image_urls:list[str])->list[Image.Image | None]:
@@ -639,7 +640,7 @@ def merge_segmented_images(directory , target_size: int|None = None):
     image_files = [f for f in os.listdir(directory) if f.lower().endswith('.jpg')]
 
     if not image_files:
-        print(f"No 'segment_*.jpg' files found in the directory: {directory}")
+        logger.debug(f"No 'segment_*.jpg' files found in the directory: {directory}")
         return
 
     grouped_images = defaultdict(list)
@@ -656,11 +657,11 @@ def merge_segmented_images(directory , target_size: int|None = None):
             full_path = os.path.join(directory, filename)
             grouped_images[original_index].append((segment_index, full_path))
         except:
-            print(filename,"Not matched the expected pattern 'X_Y.jpg'")
+            logger.warning(filename,"Not matched the expected pattern 'X_Y.jpg'")
 
 
     if not grouped_images:
-        print("No valid segments found for any original image.")
+        logger.warning("No valid segments found for any original image.")
         return
 
     # Process each group of images
@@ -669,7 +670,7 @@ def merge_segmented_images(directory , target_size: int|None = None):
         segments = natsorted(segments , key=lambda x: x[0])
 
         if len(segments) == 1:
-            print(f"Skipping original image index {original_index} as it has only one segment.")
+            logger.debug(f"Skipping original image index {original_index} as it has only one segment.")
             continue
 
         image_objects = []
@@ -686,10 +687,10 @@ def merge_segmented_images(directory , target_size: int|None = None):
                     image_objects.append(img.copy())
                     total_height += img.height
             except Exception as e:
-                print(f"Error opening image file {img_path}: {e}. Skipping this image.")
+                logger.error(f"Error opening image file {img_path}: {e}. Skipping this image.")
                 
         if len(image_objects) == 0 or total_height < 80:
-            print(f"No valid images found for original image index {original_index}.")
+            logger.warning(f"No valid images found for original image index {original_index}.")
             continue
         merged_image = Image.new(image_objects[0].mode, (width, total_height))
 
@@ -708,9 +709,9 @@ def merge_segmented_images(directory , target_size: int|None = None):
                 save_image_as_jpg(merged_image, output_path , target_size)
             else:
                 save_image_as_jpg(merged_image, output_path) 
-            print(f"Successfully saved merged image: {output_path}")
+            logger.debug(f"Successfully saved merged image: {output_path}")
         except Exception as e:
-            print(f"Error saving merged image {output_path}: {e}")
+            logger.error(f"Error saving merged image {output_path}: {e}")
 
     # 기존의 이미지 삭제
     for image in image_files:
